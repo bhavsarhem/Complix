@@ -1,146 +1,197 @@
 import streamlit as st
-from groq import Groq
 import pandas as pd
 from datetime import datetime
-import os
+import json
+from groq import Groq
+import re
 
-# Initialize Groq client with API key from secrets
+# Initialize Groq client
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# App Configuration
-st.set_page_config(page_title="GST Simplify AI", page_icon="💼", layout="wide")
+# Configure Streamlit page
+st.set_page_config(
+    page_title="GST Simplify AI",
+    page_icon="logo.jpg",
+    layout="wide"
+)
 
-# Sidebar for navigation
-st.sidebar.title("GST Simplify AI")
-menu = st.sidebar.radio("Navigate", ["Home", "Tax Calculator", "Filing Assistant", "Invoice Tracker", "Reports", "Compliance", "Regulatory Updates"])
+# CSS for better styling
+st.markdown("""
+    <style>
+    .main {
+        padding: 2rem;
+    }
+    .stButton>button {
+        width: 100%;
+    }
+    .upload-box {
+        border: 2px dashed #4CAF50;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Store invoice data in session state
-if "invoices" not in st.session_state:
-    st.session_state.invoices = []
+class GSTCalculator:
+    def __init__(self):
+        self.gst_rates = {
+            "0%": 0.00,
+            "5%": 0.05,
+            "12%": 0.12,
+            "18%": 0.18,
+            "28%": 0.28
+        }
 
-# Helper function to get AI insights from Groq
-def get_groq_insights(prompt):
+    def calculate_gst(self, base_amount, rate):
+        gst_amount = base_amount * self.gst_rates[rate]
+        total_amount = base_amount + gst_amount
+        return {
+            "base_amount": base_amount,
+            "gst_amount": gst_amount,
+            "total_amount": total_amount
+        }
+
+class InvoiceManager:
+    def __init__(self):
+        self.invoices = []
+
+    def add_invoice(self, invoice_data):
+        invoice_data['invoice_id'] = f"INV-{len(self.invoices) + 1}"
+        invoice_data['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.invoices.append(invoice_data)
+
+    def get_all_invoices(self):
+        return self.invoices
+
+def get_ai_insights(invoice_data):
+    prompt = f"""
+    Analyze the following GST invoice data and provide insights:
+    {json.dumps(invoice_data, indent=2)}
+    
+    Please provide:
+    1. Tax compliance recommendations
+    2. Potential tax saving opportunities
+    3. Risk analysis
+    4. Best practices for future transactions
+    """
+    
     try:
-        completion = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+        response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=500
+            model="mixtral-8x7b-32768",
+            max_tokens=1000
         )
-        return completion.choices[0].message.content
+        return response.choices[0].message.content
     except Exception as e:
-        return f"Error fetching insights: {str(e)}"
+        return f"Error getting AI insights: {str(e)}"
 
-# Home Page
-if menu == "Home":
-    st.title("Welcome to GST Simplify AI")
-    st.write("""
-    GST Simplify AI automates your GST processes by calculating taxes, assisting with filings, tracking compliance, managing invoices, generating reports, and keeping you updated on regulations. 
-    Use the sidebar to explore features!
-    """)
+def main():
+    st.sidebar.image("sidebarlogo.jpg", use_container_width=True)
+    st.title("GST Simplify AI")
+    
+    # Initialize session state
+    if 'calculator' not in st.session_state:
+        st.session_state.calculator = GSTCalculator()
+    if 'invoice_manager' not in st.session_state:
+        st.session_state.invoice_manager = InvoiceManager()
 
-# Tax Calculator
-elif menu == "Tax Calculator":
-    st.title("GST Tax Calculator")
-    st.write("Enter invoice details to calculate GST.")
+    # Sidebar navigation
+    page = st.sidebar.selectbox(
+        "Select Function",
+        ["GST Calculator", "Invoice Management", "Reports & Analytics", "AI Insights"]
+    )
 
-    with st.form("tax_form"):
-        amount = st.number_input("Invoice Amount (₹)", min_value=0.0, step=100.0)
-        gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28])
-        submitted = st.form_submit_button("Calculate")
+    if page == "GST Calculator":
+        st.header("GST Calculator")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            base_amount = st.number_input("Enter Base Amount (₹)", min_value=0.0, value=1000.0)
+            gst_rate = st.selectbox("Select GST Rate", list(st.session_state.calculator.gst_rates.keys()))
+            
+            if st.button("Calculate GST"):
+                result = st.session_state.calculator.calculate_gst(base_amount, gst_rate)
+                
+                st.success("GST Calculation Results")
+                st.write(f"Base Amount: ₹{result['base_amount']:,.2f}")
+                st.write(f"GST Amount: ₹{result['gst_amount']:,.2f}")
+                st.write(f"Total Amount: ₹{result['total_amount']:,.2f}")
 
-        if submitted:
-            gst_amount = amount * (gst_rate / 100)
-            total_amount = amount + gst_amount
-            st.success(f"GST Amount: ₹{gst_amount:.2f} | Total Amount: ₹{total_amount:.2f}")
+    elif page == "Invoice Management":
+        st.header("Invoice Management")
+        
+        with st.expander("Add New Invoice"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                invoice_number = st.text_input("Invoice Number")
+                customer_name = st.text_input("Customer Name")
+                invoice_date = st.date_input("Invoice Date")
+                
+            with col2:
+                base_amount = st.number_input("Base Amount (₹)", min_value=0.0)
+                gst_rate = st.selectbox("GST Rate", list(st.session_state.calculator.gst_rates.keys()))
+                
+            if st.button("Add Invoice"):
+                invoice_data = {
+                    "invoice_number": invoice_number,
+                    "customer_name": customer_name,
+                    "invoice_date": invoice_date.strftime("%Y-%m-%d"),
+                    "base_amount": base_amount,
+                    "gst_rate": gst_rate
+                }
+                
+                st.session_state.invoice_manager.add_invoice(invoice_data)
+                st.success("Invoice added successfully!")
+        
+        # Display invoices
+        st.subheader("Recent Invoices")
+        invoices_df = pd.DataFrame(st.session_state.invoice_manager.get_all_invoices())
+        if not invoices_df.empty:
+            st.dataframe(invoices_df)
+        else:
+            st.info("No invoices added yet.")
 
-            # AI Insight
-            prompt = f"Provide a brief insight on how a GST rate of {gst_rate}% affects small businesses."
-            insight = get_groq_insights(prompt)
-            st.write("**AI Insight**: ", insight)
+    elif page == "Reports & Analytics":
+        st.header("Reports & Analytics")
+        
+        invoices = st.session_state.invoice_manager.get_all_invoices()
+        if invoices:
+            df = pd.DataFrame(invoices)
+            
+            # Summary statistics
+            st.subheader("Summary Statistics")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Total Invoices", len(df))
+            with col2:
+                total_amount = df['base_amount'].sum()
+                st.metric("Total Amount (₹)", f"{total_amount:,.2f}")
+            with col3:
+                avg_amount = df['base_amount'].mean()
+                st.metric("Average Amount (₹)", f"{avg_amount:,.2f}")
+            
+            # GST Rate Distribution
+            st.subheader("GST Rate Distribution")
+            gst_dist = df['gst_rate'].value_counts()
+            st.bar_chart(gst_dist)
+            
+        else:
+            st.info("No data available for analysis. Please add some invoices first.")
 
-# Filing Assistant
-elif menu == "Filing Assistant":
-    st.title("GST Filing Assistant")
-    st.write("Simulate GST return filing with AI suggestions.")
+    elif page == "AI Insights":
+        st.header("AI Insights")
+        
+        invoices = st.session_state.invoice_manager.get_all_invoices()
+        if invoices:
+            if st.button("Generate AI Insights"):
+                with st.spinner("Generating insights..."):
+                    insights = get_ai_insights(invoices)
+                    st.markdown(insights)
+        else:
+            st.info("Please add some invoices to get AI insights.")
 
-    return_type = st.selectbox("Return Type", ["GSTR-1", "GSTR-3B"])
-    month = st.selectbox("Month", ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"])
-    year = st.number_input("Year", min_value=2020, max_value=2025, value=2025)
-
-    if st.button("Generate Filing Suggestion"):
-        prompt = f"Suggest steps to file {return_type} for {month} {year} ensuring compliance."
-        suggestion = get_groq_insights(prompt)
-        st.write("**AI Filing Suggestion**: ", suggestion)
-        st.info("Note: This is a simulation. Verify with official GST guidelines.")
-
-# Invoice Tracker
-elif menu == "Invoice Tracker":
-    st.title("Invoice Tracker")
-    st.write("Manage your invoices here.")
-
-    with st.form("invoice_form"):
-        invoice_id = st.text_input("Invoice ID")
-        amount = st.number_input("Amount (₹)", min_value=0.0)
-        gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28])
-        date = st.date_input("Date")
-        submitted = st.form_submit_button("Add Invoice")
-
-        if submitted:
-            st.session_state.invoices.append({
-                "Invoice ID": invoice_id,
-                "Amount": amount,
-                "GST Rate": gst_rate,
-                "GST Amount": amount * (gst_rate / 100),
-                "Total": amount * (1 + gst_rate / 100),
-                "Date": date
-            })
-            st.success("Invoice added successfully!")
-
-    if st.session_state.invoices:
-        df = pd.DataFrame(st.session_state.invoices)
-        st.dataframe(df)
-
-# Reports
-elif menu == "Reports":
-    st.title("Report Generation")
-    st.write("Generate and download GST reports.")
-
-    if st.session_state.invoices:
-        df = pd.DataFrame(st.session_state.invoices)
-        st.dataframe(df)
-
-        csv = df.to_csv(index=False)
-        st.download_button(
-            label="Download Report as CSV",
-            data=csv,
-            file_name=f"GST_Report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("No invoices available. Add invoices in the Invoice Tracker first.")
-
-# Compliance Tracking
-elif menu == "Compliance":
-    st.title("Compliance Tracker")
-    st.write("Check your GST compliance status (Simulation).")
-
-    if st.button("Check Compliance"):
-        prompt = "Provide a brief GST compliance checklist for a small business."
-        checklist = get_groq_insights(prompt)
-        st.write("**AI Compliance Checklist**: ", checklist)
-        st.info("This is a simulated checklist. Consult a tax professional for accuracy.")
-
-# Regulatory Updates
-elif menu == "Regulatory Updates":
-    st.title("GST Regulatory Updates")
-    st.write("Stay updated with the latest GST regulations.")
-
-    if st.button("Fetch Latest Updates"):
-        prompt = "Provide a summary of the latest GST regulation changes in India as of February 2025."
-        updates = get_groq_insights(prompt)
-        st.write("**AI-Generated Updates**: ", updates)
-        st.info("This is a simulation based on AI. Check official GST portals for real updates.")
-
-# Footer
-st.sidebar.write("Developed with ❤️ by Hem & Bhavik | Feb 21, 2025")
+if __name__ == "__main__":
+    main()
