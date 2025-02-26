@@ -143,4 +143,4 @@ elif menu == "Regulatory Updates":
         st.info("This is a simulation based on AI. Check official GST portals for real updates.")
 
 # Footer
-st.sidebar.write("Developed with ❤️ by xAI's Grok 3 | Feb 21, 2025")
+st.sidebar.write("Developed with ❤️ by Hem Bhavik | Feb 21, 2025")
